@@ -95,6 +95,96 @@ def report_pca(out_dir: Path) -> dict:
     return res
 
 
+def report_stability(out_dir: Path) -> dict:
+    """Rolling PCA of 1-10 year monthly changes, 60-month windows: each window's shares; how
+    closely each window's components match the full-sample ones (absolute cosine) and the overlap
+    of the three-shape set (mean squared cosine, which ignores order and sign); out of sample, how
+    much of the next 12 months' movement the window's three shapes capture, against the best any
+    three could (those months' own first three) and a parallel shift alone; and the 10-year
+    yield's kink against its neighbours (10y minus the average of 9y and 11y)."""
+    from yc import data, pca
+
+    w = data.yields()
+    d = changes(w, CORE)
+    X = d.to_numpy()
+    L = pca.pca(X)["loadings"][:, :3]
+    r = pca.rolling(X, list(d.index))
+    df = pd.DataFrame({
+        "end": [x["end"] for x in r],
+        **{NAMES[k]: [x["share"][k] for x in r] for k in range(3)},
+        **{f"match {NAMES[k]}": [abs(x["loadings"][:, k] @ L[:, k]) for x in r]
+           for k in range(3)},
+        "overlap": [np.linalg.norm(x["loadings"].T @ L) ** 2 / 3 for x in r],
+        "captured": [x.get("next_captured", np.nan) for x in r],
+        "best": [x.get("next_best", np.nan) for x in r]}).set_index("end")
+    par = np.ones((len(CORE), 1)) / np.sqrt(len(CORE))
+    df["parallel"] = [pca.captured(X[e:e + 12], par) if e + 12 <= len(X) else np.nan
+                      for e in range(60, len(X) + 1)]
+    res = {"windows": f"{len(df)} windows of 60 months ending "
+                      f"{df.index[0]:%b %Y}-{df.index[-1]:%b %Y}"}
+    for nm in NAMES:
+        res[f"  {nm} share"] = (f"median {df[nm].median():.1%}, range {df[nm].min():.1%}-"
+                                f"{df[nm].max():.1%}")
+    for nm in NAMES:
+        m = df[f"match {nm}"]
+        res[f"  {nm} matches the full-sample shape (|cosine|)"] = (
+            f"median {m.median():.2f}, lowest {m.min():.2f} ({m.idxmin():%b %Y}); below 0.9 in "
+            f"{(m < 0.9).mean():.0%} of windows")
+    ov = df["overlap"]
+    res["  three-shape set overlap"] = (f"median {ov.median():.2f}, lowest {ov.min():.2f} "
+                                         f"({ov.idxmin():%b %Y})")
+    ok = df["captured"].notna()
+    res["next 12 months' movement captured"] = (
+        f"{ok.sum()} windows: previous window's three shapes median "
+        f"{df.loc[ok, 'captured'].median():.1%} (lowest {df.loc[ok, 'captured'].min():.1%}); "
+        f"best possible three {df.loc[ok, 'best'].median():.1%}; parallel shift alone "
+        f"{df.loc[ok, 'parallel'].median():.1%}")
+    lw = [x for x in r if x["end"] == pd.Timestamp("2018-12-31")][0]
+    res["  window to Dec 2018, second component loadings 1-10y"] = " ".join(
+        f"{v:+.2f}" for v in lw["loadings"][:, 1])
+    kink = (w[10] - (w[9] + w[11]) / 2) * 100
+    dk = kink.diff().dropna()
+    mid = (dk.index.year >= 2014) & (dk.index.year <= 2020)
+    res["10-year kink against 9y and 11y, monthly change"] = (
+        f"standard deviation {dk[mid].std():.1f} bp in 2014-2020 against {dk[~mid].std():.1f} bp in"
+        " other years; largest " + ", ".join(
+            f"{t:%b %Y} {v:+.0f} bp" for t, v in dk.loc[dk.abs().nlargest(3).index].items()))
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    ax = axes[0]
+    for nm, col in zip(NAMES, (plots.SERIES[0], plots.SERIES[1], plots.SERIES[2]), strict=True):
+        ax.plot(df.index, 100 * df[nm], color=col, lw=2, label=nm)
+    ax.set_ylabel("share of movement in the 5 years\nto that month, %")
+    ax.set_yscale("log")
+    ax.set_yticks([1, 3, 10, 30, 100])
+    ax.set_yticklabels(["1%", "3%", "10%", "30%", "100%"])
+    ax.legend(frameon=False, fontsize=9, loc="lower left")
+    ax.set_title("Each shape's share, rolling 5 years", fontsize=10.5, loc="left")
+    ax.set_xlabel("end of the 5-year window")
+    ax = axes[1]
+    for c, lab, col in (("match level", "level matches full-sample shape", plots.SERIES[0]),
+                        ("match slope", "slope matches", plots.SERIES[1]),
+                        ("captured", "next year captured by the 3 shapes", plots.TEXT_2)):
+        ax.plot(df.index, df[c], color=col, lw=2 if c != "captured" else 1.4, label=lab,
+                ls="-" if c != "captured" else "--")
+    ax.axvspan(pd.Timestamp("2014-01-01"), pd.Timestamp("2020-12-31"), color=plots.GRID, lw=0)
+    ax.text(pd.Timestamp("2014-03-01"), 0.03, "10-year yield\njumping on its own", fontsize=8.5,
+            color=plots.TEXT_2)
+    ax.set_ylim(0, 1.05)
+    ax.set_xlabel("end of the 5-year window")
+    ax.set_ylabel("similarity / share (1 = identical / all)")
+    ax.legend(frameon=False, fontsize=8.5, loc="lower left", bbox_to_anchor=(0, 0.12))
+    ax.set_title("Level never changed; slope gave way for a while", fontsize=10.5, loc="left")
+    fig.suptitle("The level shape held for 25 years; old shapes still captured most of the next "
+                 "year",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "stability")
+    plt.close(fig)
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "pca": report_pca,
+    "stability": report_stability,
 }

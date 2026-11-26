@@ -15,7 +15,7 @@ curve's movement each explains, and each one's path over time, computed in your 
 ## Features
 
 - [x] PCA of monthly yield changes: level, slope and curvature, and how much each explains
-- [ ] Stability of the shapes over time: rolling PCA through rate cycles
+- [x] Stability of the shapes over time: rolling PCA through rate cycles
 - [ ] Changes against levels, and how the maturities chosen change the answer
 - [ ] Hedging a bond portfolio with the components, against duration alone, out of sample
 - [ ] Does the curve predict? Slope and curvature against future rate changes, out of sample
@@ -50,12 +50,38 @@ nothing is out of sample here.
   13.0%, then 3.7% for a component loading −0.86 on the 10-year yield and under 0.3 on every other
   maturity.
 
+### 2. The level shape held for 25 years; old shapes still captured most of the next year
+
+<a href="docs/img/stability.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/stability.png"><img src="docs/img/stability.gif" alt="Rolling five-year shares of the level, slope and curvature components, and how closely each window's level and slope match the full-sample shapes, with the share of the next year's movement the window's shapes captured, 2001-2026" width="720"></picture></a>
+
+Finding 1's 1–10 year monthly changes, with PCA rerun on every 60-month window (297 windows ending
+October 2001 to June 2026). Each window's components are compared with the full-sample ones by the
+absolute cosine of their loadings (1 = the same shape), and the three-shape set by its overlap with
+the full-sample set (the mean squared cosine, which ignores order and sign). Out of sample, each
+window's three shapes are applied to the next 12 months, with nothing refitted: the share of those
+months' movement they capture, against the most any three shapes could capture (those months' own
+first three, an in-sample ceiling) and a parallel shift of the whole curve alone. The 10-year
+yield's kink is its distance from the average of the 9- and 11-year yields.
+
+- **Level never changed shape.** Every window's level matched the full-sample level with a cosine of
+  0.96 or more (median 0.99); its share ranged from 70.7% to 92.2% (median 81.3%).
+- **Past shapes captured most of the next year.** Each window's three shapes captured a median 92.7%
+  of the next 12 months' movement, against a ceiling of 96.7% and 75.6% for a parallel shift alone;
+  the worst year was 50.5%.
+- **Slope gave way to the 10-year yield for a while.** In windows ending from late 2017 to 2021 the
+  second component was the 10-year yield moving on its own (loading +0.90 at 10 years, 0.25 or less
+  elsewhere, in the window to December 2018), and slope's match fell as low as 0.16 (October 2018).
+  The 10-year kink moved 20.3 bp a month in 2014–2020 against 6.7 bp in other years, with jumps of
+  +68 bp (April 2016), +59 bp (December 2016) and −59 bp (May 2020).
+- **Curvature was the least stable.** Its match with the full-sample shape was below 0.9 in 66% of
+  windows (median 0.85), and its share ran from 1.0% to 7.4%.
+
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py   # RBI Handbook tables -> data/rbi/yields.parquet
-uv run yc report pca                  # topics: pca
+uv run yc report pca                  # topics: pca, stability
 uv run python scripts/build_site.py   # PCA lab -> site/index.html
 uv run pytest
 ```
@@ -66,7 +92,8 @@ The yields are downloaded from rbi.org.in, not committed.
 
 - `src/yc/data.py`: fetches every Handbook edition's table of month-end SGL yields by maturity,
   parses it, merges editions (newest wins) and refuses a history with a missing month.
-- `src/yc/pca.py`: PCA of yield moves with fixed signs for level, slope and curvature.
+- `src/yc/pca.py`: PCA of yield moves with fixed signs for level, slope and curvature, the share
+  of movement a set of shapes captures, and rolling windows scored on the following months.
 - `src/yc/yc.js`: the lab's browser copy of the PCA (Jacobi eigen-decomposition), tested against
   Python through Node.
 - `src/yc/site.py`: the PCA lab, one static Plotly page carrying the monthly yields.
