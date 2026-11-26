@@ -19,7 +19,7 @@ curve's movement each explains, and each one's path over time, computed in your 
 - [x] Changes against levels, and how the maturities chosen change the answer
 - [x] Hedging a bond portfolio with the components, against duration alone, out of sample
 - [x] Does the curve predict? Slope and curvature against future rate changes, out of sample
-- [ ] PCA against Nelson-Siegel: fit and stability
+- [x] PCA against Nelson-Siegel: fit and stability
 - [ ] Verdict: a curve-risk model and a regime input for the reference model
 
 ## Findings
@@ -156,13 +156,37 @@ whose outcomes were already known, and is scored against the average of those sa
 - **Curvature added nothing out of sample.** With slope and curvature together, out-of-sample R² was
   13.1%, −21.7% and −27.2%, worse than slope alone every time, though in-sample R² rose.
 
+### 6. A three-number formula fitted the curve as well as PCA, out of sample
+
+<a href="docs/img/ns.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/ns.png"><img src="docs/img/ns.gif" alt="Nelson-Siegel's level, slope and curvature shapes with a 1.75-year decay, and the 2010-2026 fitting error by maturity for Nelson-Siegel and for PCA shapes estimated on 1996-2009" width="720"></picture></a>
+
+Nelson-Siegel describes each month's curve by three numbers: a level, a slope that fades with
+maturity and a curvature hump, with one decay setting fixed for all months (Diebold and Li's
+version), fitted to the 1–10 year yields by least squares. The decay is the one that fits the
+1996–2009 curves best (a grid from 0.25 to 10 years), and PCA shapes are estimated on the same
+1996–2009 months (on yield levels for fitting curves, on monthly changes for capturing moves); both
+are then held fixed and scored on 2010–2026 (198 curves). The ceiling is PCA fitted on the
+2010–2026 curves themselves.
+
+- **Both fitted new curves equally well.** Nelson-Siegel with a 1.75-year decay (its hump peaks near
+  3.1 years) fitted 2010–2026 curves with a root-mean-square error of 7.8 bp, PCA shapes from
+  1996–2009 8.0 bp, against a 6.3 bp ceiling.
+- **Both captured the same share of moves.** Of 2010–2026 monthly changes, Nelson-Siegel's shapes
+  captured 90.8%, PCA's from 1996–2009 90.3%, the best possible three 91.8%.
+- **Both missed the 10-year point most.** Its error was 12.3 bp for Nelson-Siegel and 12.0 bp for
+  PCA, against 4.3–4.4 bp at 1 year; neither smooth set of shapes can follow a single maturity moving
+  on its own (finding 2).
+- **Their slope and curvature were the same thing; their levels weren't.** Monthly changes in
+  Nelson-Siegel's slope and curvature correlated −0.93 and −0.97 with PCA's; its level only +0.57
+  with PCA's level, which leans to the short end (finding 1), and +0.69 with PCA's curvature.
+
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py   # RBI Handbook tables -> data/rbi/yields.parquet
 uv run yc report pca                  # topics: pca, stability, levels, hedge,
-                                      # predict
+                                      # predict, ns
 uv run python scripts/build_site.py   # PCA lab -> site/index.html
 uv run pytest
 ```
@@ -179,6 +203,8 @@ The yields are downloaded from rbi.org.in, not committed.
   sized on past months only, and the month-by-month out-of-sample test.
 - `src/yc/predict.py`: slope and curvature signals, the 10-year bond's excess return, Newey-West
   regressions and the expanding-window out-of-sample forecasts.
+- `src/yc/ns.py`: Nelson-Siegel with a fixed decay: shapes, least-squares fits, the decay chosen on
+  training curves.
 - `src/yc/yc.js`: the lab's browser copy of the PCA (Jacobi eigen-decomposition), tested against
   Python through Node.
 - `src/yc/site.py`: the PCA lab, one static Plotly page carrying the monthly yields.

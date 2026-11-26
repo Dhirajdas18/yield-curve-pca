@@ -448,10 +448,93 @@ def report_predict(out_dir: Path) -> dict:
     return res
 
 
+def report_ns(out_dir: Path) -> dict:
+    """Nelson-Siegel with a fixed decay against PCA, 1-10 years: the decay chosen on 1996-2009
+    curves, and PCA shapes estimated on 1996-2009 (on levels for fitting curves, on changes for
+    capturing moves), both scored on 2010-2026: root-mean-square error of each month's fitted
+    curve, overall and by maturity; the share of each month's change captured; and how the
+    Nelson-Siegel factors' monthly changes line up with the PCA components'."""
+    from yc import data, ns, pca
+
+    w = data.yields()
+    d = changes(w, CORE)
+    lv = w.loc[d.index[0] - pd.offsets.MonthEnd(1):, CORE].dropna()
+    tr, te = lv.loc[:"2009"], lv.loc["2010":]
+    lam = ns.choose_lam(tr.to_numpy(), CORE)
+    _, fitted = ns.fit(te.to_numpy(), CORE, lam)
+    ns_err = (te.to_numpy() - fitted) * 100
+    p = pca.pca(tr.to_numpy())
+    L, mu = p["loadings"][:, :3], p["mean"]
+    pc_err = (te.to_numpy() - ((te.to_numpy() - mu) @ L @ L.T + mu)) * 100
+    q = pca.pca(te.to_numpy())
+    own = (te.to_numpy() - ((te.to_numpy() - q["mean"]) @ q["loadings"][:, :3]
+                            @ q["loadings"][:, :3].T + q["mean"])) * 100
+    rms = lambda e: float(np.sqrt((e ** 2).mean()))  # noqa: E731
+    res = {"training": f"{len(tr)} curves {tr.index[0]:%b %Y}-{tr.index[-1]:%b %Y}; test {len(te)} "
+                       f"curves {te.index[0]:%b %Y}-{te.index[-1]:%b %Y}",
+           "Nelson-Siegel decay chosen on training curves": f"{lam:.2f} years (curvature peaks "
+                                                            f"near {1.79 * lam:.1f} years)"}
+    res["test curves fitted, root-mean-square error"] = (
+        f"Nelson-Siegel {rms(ns_err):.1f} bp; PCA shapes from training {rms(pc_err):.1f} bp; PCA "
+        f"fitted on the test curves themselves {rms(own):.1f} bp")
+    res["  by maturity, Nelson-Siegel"] = " ".join(f"{m}y {v:.1f}" for m, v in
+                                                     zip(CORE, np.sqrt((ns_err ** 2).mean(0)),
+                                                         strict=True))
+    res["  by maturity, PCA from training"] = " ".join(f"{m}y {v:.1f}" for m, v in
+                                                        zip(CORE, np.sqrt((pc_err ** 2).mean(0)),
+                                                            strict=True))
+    dtr, dte = d.loc[:"2009"].to_numpy(), d.loc["2010":].to_numpy()
+    Q, _ = np.linalg.qr(ns.basis(CORE, lam))
+    res["test monthly changes captured"] = (
+        f"Nelson-Siegel shapes {pca.captured(dte, Q):.1%}; PCA shapes from training "
+        f"{pca.captured(dte, pca.pca(dtr)['loadings'][:, :3]):.1%}; best possible three "
+        f"{pca.pca(dte)['share'][:3].sum():.1%}")
+    bt, _ = ns.fit(lv.to_numpy(), CORE, lam)
+    db = np.diff(bt, axis=0)[-len(d):]
+    sc = pca.pca(d.to_numpy())["scores"][:, :3]
+    C = np.corrcoef(np.c_[db, sc].T)[:3, 3:]
+    for i, nm in enumerate(("level b0", "slope b1", "curvature b2")):
+        res[f"  Nelson-Siegel {nm} change, correlation with PCA level / slope / curvature"] = (
+            " / ".join(f"{v:+.2f}" for v in C[i]))
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    ax = axes[0]
+    tau = np.linspace(0.25, 30, 200)
+    Bf = ns.basis(tau, lam)
+    for k, (nm, col) in enumerate(zip(NAMES, (plots.SERIES[0], plots.SERIES[1], plots.SERIES[2]),
+                                      strict=True)):
+        ax.plot(tau, Bf[:, k], color=col, lw=2.2, label=f"{nm} (b{k})")
+    ax.axvspan(1, 10, color=plots.GRID, lw=0)
+    ax.text(5.5, 1.05, "maturities used", fontsize=8.5, color=plots.TEXT_2, ha="center")
+    ax.set_ylim(-0.05, 1.15)
+    ax.set_xlabel("years to maturity")
+    ax.set_ylabel("how much a yield moves per unit\nof each Nelson-Siegel factor")
+    ax.legend(frameon=False, fontsize=9, loc="center right")
+    ax.set_title(f"Nelson-Siegel's three fixed shapes (decay {lam:.2f} years)", fontsize=10.5,
+                 loc="left")
+    ax = axes[1]
+    x = np.arange(len(CORE))
+    ax.bar(x - 0.2, np.sqrt((ns_err ** 2).mean(0)), 0.38, color=plots.SERIES[0],
+           label=f"Nelson-Siegel ({rms(ns_err):.1f} bp overall)")
+    ax.bar(x + 0.2, np.sqrt((pc_err ** 2).mean(0)), 0.38, color=plots.MUTED,
+           label=f"PCA shapes from 1996-2009 ({rms(pc_err):.1f} bp)")
+    ax.set_xticks(x, [f"{m}y" for m in CORE])
+    ax.set_ylabel("2010-2026 fitting error, bp\n(root mean square)")
+    ax.legend(frameon=False, fontsize=8.5, loc="upper left")
+    ax.set_title("Both fitted 2010-2026 curves to about 8 bp", fontsize=10.5, loc="left")
+    fig.suptitle("A three-number formula fitted the curve as well as PCA, out of sample",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "ns")
+    plt.close(fig)
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "pca": report_pca,
     "stability": report_stability,
     "levels": report_levels,
     "hedge": report_hedge,
     "predict": report_predict,
+    "ns": report_ns,
 }
