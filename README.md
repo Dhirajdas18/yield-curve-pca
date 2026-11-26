@@ -16,7 +16,7 @@ curve's movement each explains, and each one's path over time, computed in your 
 
 - [x] PCA of monthly yield changes: level, slope and curvature, and how much each explains
 - [x] Stability of the shapes over time: rolling PCA through rate cycles
-- [ ] Changes against levels, and how the maturities chosen change the answer
+- [x] Changes against levels, and how the maturities chosen change the answer
 - [ ] Hedging a bond portfolio with the components, against duration alone, out of sample
 - [ ] Does the curve predict? Slope and curvature against future rate changes, out of sample
 - [ ] PCA against Nelson-Siegel: fit and stability
@@ -76,12 +76,38 @@ yield's kink is its distance from the average of the 9- and 11-year yields.
 - **Curvature was the least stable.** Its match with the full-sample shape was below 0.9 in 66% of
   windows (median 0.85), and its share ran from 1.0% to 7.4%.
 
+### 3. Run PCA on changes: levels inflated the first share from 83% to 98%
+
+<a href="docs/img/levels.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/levels.png"><img src="docs/img/levels.gif" alt="Share of the first component for Indian yields on levels and changes against 500 sets of unrelated random walks, and the level loadings from covariance and correlation PCA across 1 to 10 years" width="720"></picture></a>
+
+Finding 1's 1–10 year yields, PCA run on month-end levels (357 months, October 1996 to June 2026)
+and on monthly changes over the same months (356). To see what levels do on their own, PCA is also
+run on 500 sets of 10 independent random walks of the same length (seed 0): series with nothing in
+common, on their levels and on their steps. Then two choices on changes: correlation PCA (each
+maturity scaled to the same volatility) against covariance PCA, and different maturity sets.
+
+- **Levels made one shape look almost everything.** On levels the first component explained 97.5%,
+  on changes 83.0%; slope fell from 9.2% to 2.1% and curvature from 3.3% to 0.2%. Yield levels
+  barely change from one month to the next (lag-one autocorrelation 0.968–0.987); changes don't
+  carry over (−0.04 to +0.07).
+- **Unrelated series did the same.** On the levels of independent random walks the first component
+  explained a median 63.6% (5–95%: 45.6–79.0%); on their steps, 12.9%, close to one tenth, as it
+  should be.
+- **The shapes themselves agreed.** Levels and changes gave nearly the same loadings: cosine 0.99
+  for level and slope, 0.93 for curvature.
+- **Scaling each maturity flattened the level shape.** Correlation PCA gave level 84.8% with
+  loadings of 0.28–0.33 across maturities (peaking at 5–7 years), against covariance PCA's 0.41 at
+  1 year falling to 0.28 at 10.
+- **The 1-year yield carried a lot of the slope and curvature.** Without it, level rose to 86.7%,
+  slope fell to 7.4% and curvature to 2.0%; with only 1, 2, 5 and 10 years the shares barely moved
+  (83.4%, 10.2%, 4.2%).
+
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py   # RBI Handbook tables -> data/rbi/yields.parquet
-uv run yc report pca                  # topics: pca, stability
+uv run yc report pca                  # topics: pca, stability, levels
 uv run python scripts/build_site.py   # PCA lab -> site/index.html
 uv run pytest
 ```

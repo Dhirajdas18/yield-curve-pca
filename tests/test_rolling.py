@@ -21,3 +21,10 @@ def test_rolling_windows_score_the_next_months_with_past_shapes_only():
     assert np.isclose(first["next_captured"], expect)
     assert first["next_captured"] <= first["next_best"] + 1e-12
     assert "next_captured" not in r[-1]  # no 12 months left after the last window
+
+
+def test_levels_of_unrelated_random_walks_look_like_one_component():
+    rng = np.random.default_rng(0)
+    e = rng.normal(0, 1, (356, 10))
+    assert pca.pca(e.cumsum(axis=0))["share"][0] > 0.4  # spurious common "level"
+    assert pca.pca(e)["share"][0] < 0.2  # their changes are rightly unrelated

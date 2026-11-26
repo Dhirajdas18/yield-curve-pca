@@ -184,7 +184,97 @@ def report_stability(out_dir: Path) -> dict:
     return res
 
 
+def _shares(share) -> str:
+    return ", ".join(f"{nm} {s_:.1%}" for nm, s_ in zip(NAMES, share, strict=False))
+
+
+def report_levels(out_dir: Path) -> dict:
+    """PCA on yield levels against monthly changes over the same months (1-10 years): shares,
+    how alike the shapes are, how persistent each series is (lag-one autocorrelation), and what
+    PCA on levels does to unrelated series (500 sets of 10 independent random walks of the same
+    length, seed 0). Then choices: covariance against correlation PCA, and maturity sets
+    (without the 1-year, four maturities, without the 10-year)."""
+    from yc import data, pca
+
+    w = data.yields()
+    d = changes(w, CORE)
+    lv = w.loc[d.index[0] - pd.offsets.MonthEnd(1):d.index[-1], CORE]
+    pl, pc = pca.pca(lv.to_numpy() * 100), pca.pca(d.to_numpy())
+    res = {"months": f"{len(lv)} levels and {len(d)} changes, "
+                     f"{lv.index[0]:%b %Y}-{lv.index[-1]:%b %Y}"}
+    res["levels, share"] = _shares(pl["share"])
+    res["changes, share"] = _shares(pc["share"])
+    res["  shape match, levels against changes (|cosine|)"] = ", ".join(
+        f"{nm} {abs(pl['loadings'][:, k] @ pc['loadings'][:, k]):.2f}"
+        for k, nm in enumerate(NAMES))
+    ar = [np.corrcoef(lv[m].to_numpy()[1:], lv[m].to_numpy()[:-1])[0, 1] for m in CORE]
+    arc = [np.corrcoef(d[m].to_numpy()[1:], d[m].to_numpy()[:-1])[0, 1] for m in CORE]
+    res["  lag-one autocorrelation"] = (f"levels {min(ar):.3f}-{max(ar):.3f}; changes "
+                                        f"{min(arc):+.2f} to {max(arc):+.2f}")
+    rng = np.random.default_rng(0)
+    rw_l, rw_c = [], []
+    for _ in range(500):
+        e = rng.normal(0, 1, (len(lv), len(CORE)))
+        rw_l.append(pca.pca(e.cumsum(axis=0))["share"][0])
+        rw_c.append(pca.pca(e)["share"][0])
+    rw_l, rw_c = np.array(rw_l), np.array(rw_c)
+    res["independent random walks, first component's share"] = (
+        f"on levels median {np.median(rw_l):.1%} (5-95%: {np.percentile(rw_l, 5):.1%}-"
+        f"{np.percentile(rw_l, 95):.1%}); on their changes median {np.median(rw_c):.1%}")
+    z = (d - d.mean()) / d.std()
+    pz = pca.pca(z.to_numpy())
+    res["correlation PCA on changes"] = (
+        _shares(pz["share"]) + "; level loadings "
+        + " ".join(f"{v:.2f}" for v in pz["loadings"][:, 0]))
+    res["  covariance PCA level loadings"] = " ".join(f"{v:.2f}" for v in pc["loadings"][:, 0])
+    variants = {"1-10 years": CORE, "2-10 years (no 1-year)": CORE[1:],
+                "1, 2, 5, 10 years": [1, 2, 5, 10], "1-9 years (no 10-year)": CORE[:-1]}
+    vs = {}
+    for nm, cols in variants.items():
+        dd = changes(w, cols)
+        q = pca.pca(dd.to_numpy())
+        vs[nm] = q["share"][:3]
+        res[f"changes, {nm} ({len(dd)} months)"] = _shares(q["share"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    ax = axes[0]
+    bins = np.linspace(0, 1, 41)
+    ax.hist(rw_c, bins=bins, color=plots.MUTED, label="unrelated series, changes")
+    ax.hist(rw_l, bins=bins, color=plots.SERIES[1], alpha=0.85, label="unrelated series, levels")
+    for v, lab, col in ((pc["share"][0], "Indian yields, changes", plots.SERIES[0]),
+                        (pl["share"][0], "Indian yields, levels", plots.SERIES[0])):
+        ax.axvline(v, color=col, lw=2, ls="-" if "changes" in lab else "--")
+        ax.text(v, ax.get_ylim()[1] * (0.9 if "levels" in lab else 0.75), f" {lab}\n {v:.0%}",
+                fontsize=8.5, color=plots.TEXT, ha="right" if "levels" in lab else "left")
+    ax.xaxis.set_major_formatter(lambda v, _: f"{100 * v:.0f}%")
+    ax.set_xlabel("share of movement in the first component")
+    ax.set_ylabel("number of simulated sets (of 500)")
+    ax.legend(frameon=False, fontsize=8.5, loc="upper left")
+    ax.set_title("Levels make even unrelated series look like one", fontsize=10.5, loc="left")
+    ax = axes[1]
+    x = np.arange(len(CORE))
+    ax.plot(CORE, pc["loadings"][:, 0], color=plots.SERIES[0], lw=2.2, marker="o", ms=5,
+            label=f"covariance PCA (level {pc['share'][0]:.0%})")
+    ax.plot(CORE, pz["loadings"][:, 0], color=plots.SERIES[3], lw=2.2, marker="o", ms=5,
+            label=f"correlation PCA (level {pz['share'][0]:.0%})")
+    ax.axhline(1 / np.sqrt(len(CORE)), color=plots.TEXT_2, lw=0.8, ls=":")
+    ax.text(10, 1 / np.sqrt(len(CORE)) + 0.005, "a parallel shift", fontsize=8.5,
+            color=plots.TEXT_2, ha="right", va="bottom")
+    ax.set_xticks(CORE, [f"{m}y" for m in CORE])
+    ax.set_ylabel("level loading")
+    ax.legend(frameon=False, fontsize=9, loc="upper right")
+    ax.set_title("Scaling each maturity flattens the level shape", fontsize=10.5, loc="left")
+    del x, vs
+    fig.suptitle("Run PCA on changes: levels inflated the first share from 83% to 98%",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "levels")
+    plt.close(fig)
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "pca": report_pca,
     "stability": report_stability,
+    "levels": report_levels,
 }
