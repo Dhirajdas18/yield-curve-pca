@@ -125,9 +125,11 @@ $sections
 <footer class="wrap">
 <p>Rebuilt every month by GitHub Actions from RBI’s latest tables ($first to $last); the analysis
 runs in your browser.</p>
-<p>Data: $source, one table per Handbook edition, merged with the newest edition preferred. Yields
-come from settled (SGL) trades in Government of India dated securities, so thinly traded
-maturities can be noisy, and some long maturities are missing before 2018.</p>
+<p>Data: $source, one table per Handbook edition, merged with the newest edition preferred, kept
+exactly as published. RBI computes these fixed-maturity yields from settled (SGL) trades in
+Government of India dated securities and does not document how, so a single maturity can jump on
+its own (the 10-year in 2014–2020, for example). Month-end values only; some long maturities are
+missing before 2018. The page carries no other market data.</p>
 <p>Research only, not investment advice.</p>
 </footer>
 <script>

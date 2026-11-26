@@ -6,7 +6,9 @@
 Principal component analysis of the Indian government bond yield curve from 1996 to 2026, on
 RBI's month-end yields of Government of India dated securities from 1 to 30 years to maturity
 (Handbook of Statistics on Indian Economy): the shapes the curve moves in, how stable they are,
-hedging with them, what they predict, and how they compare with a Nelson-Siegel curve.
+hedging with them, what they predict, and how they compare with a Nelson-Siegel curve. The last
+finding also uses NIFTY and stock prices from a local NSE archive; only derived results are
+committed.
 
 **Live PCA lab: [dhirajdas18.github.io/yield-curve-pca](https://dhirajdas18.github.io/yield-curve-pca/)**,
 pick any years and maturities and see the level, slope and curvature shapes, how much of the
@@ -29,8 +31,10 @@ curve's movement each explains, and each one's path over time, computed in your 
 <a href="docs/img/pca.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/pca.png"><img src="docs/img/pca.gif" alt="Loadings of the level, slope and curvature components across 1 to 10 year maturities, and the share of yield movement each component explains in four samples" width="720"></picture></a>
 
 RBI's month-end yields from settled (SGL) trades in Government of India dated securities, merged
-from the Handbook editions since 2008 with the newest edition preferred; every month from April
-1996 to June 2026 is covered. PCA is the eigen-decomposition of the covariance of monthly yield
+from the Handbook editions since 2008 with the newest edition preferred (overlapping editions
+agree to 0.0001) and kept as published; every month from April 1996 to June 2026 is covered. RBI
+computes these fixed-maturity yields from traded bonds and does not document how, so a single
+maturity can move on its own. PCA is the eigen-decomposition of the covariance of monthly yield
 changes in basis points, over the longest run of consecutive months with every chosen maturity:
 1 to 10 years from November 1996 (356 changes), and 1, 2, 3, 5, 7, 10, 15, 20, 25 and 30 years
 from December 2017 (103), when 30-year yields become complete. Signs are fixed so level loads
@@ -43,12 +47,15 @@ nothing is out of sample here.
   30–33 bp from 3 to 10 years, so the level component leaned towards the short end (loading 0.41 at
   1 year against 0.28 at 10).
 - **Three components rebuilt most months closely.** The error left after three components was 7.2
-  bp a month (root mean square) against 33.9 bp of raw moves; the largest single miss was 81 bp.
+  bp a month (root mean square) against 33.9 bp of raw moves; the largest single miss was 81 bp, at
+  4 years in August 1999, where RBI's table prints 11.84% between 10.63% at 3 years and 11.00% at 5,
+  reversed the next month.
 - **Level mattered less after 2010.** Its share was 85.6% in 1996–2009 and 76.0% in 2010–2026, with
   slope rising from 8.3% to 11.9%.
 - **On 1–30 years the third component was mostly the 10-year yield on its own.** Level 73.9%, slope
   13.0%, then 3.7% for a component loading −0.86 on the 10-year yield and under 0.3 on every other
-  maturity.
+  maturity; the fourth explained 3.6%, so close that the third's exact shape is not well pinned
+  down.
 
 ### 2. The level shape held for 25 years; old shapes still captured most of the next year
 
@@ -72,7 +79,8 @@ yield's kink is its distance from the average of the 9- and 11-year yields.
   second component was the 10-year yield moving on its own (loading +0.90 at 10 years, 0.25 or less
   elsewhere, in the window to December 2018), and slope's match fell as low as 0.16 (October 2018).
   The 10-year kink moved 20.3 bp a month in 2014–2020 against 6.7 bp in other years, with jumps of
-  +68 bp (April 2016), +59 bp (December 2016) and −59 bp (May 2020).
+  +68 bp (April 2016), +59 bp (December 2016) and −59 bp (May 2020); whether that reflects the
+  10-year bonds themselves or how RBI builds its 10-year point isn't known.
 - **Curvature was the least stable.** Its match with the full-sample shape was below 0.9 in 66% of
   windows (median 0.85), and its share ran from 1.0% to 7.4%.
 
@@ -120,14 +128,15 @@ convexity, carry, roll-down and trading costs are left out.
 - **The regression hedge did best.** Minimum variance left 14% of the ladder's risk, 31% of the
   bullet's and 20% of the short book's; duration left 55%, 53% and 77%.
 - **Level and slope beat duration.** The two-bond PCA hedge left 35%, 51% and 22%.
-- **The exact three-shape hedge blew up.** It left 91%, 100% and 230%. In a few months the three
-  bonds could barely offset the unstable curvature shape (finding 2), and the hedge grew to 156
-  times the ladder (April 2007), 83 times (February 2016) and 46 times (September 2005); the five
-  worst months carried 75% of its variance.
+- **The exact three-shape hedge blew up.** It left 91%, 100% and 230%. In some months curvature
+  barely loaded on the 5- and 10-year hedge bonds (−0.04 and +0.02 in April 2007), so the three
+  bonds could hardly offset it: the system's condition number reached 811 against a median of 2.8,
+  and the hedge grew to 156 times the ladder (April 2007), 83 times (February 2016) and 46 times
+  (September 2005); the five worst months carried 75% of its variance.
 - **In 2014–2020 duration hedging stopped working.** On the ladder it left 105% of the risk in those
   years, against 41% in 2001–2013 and 48% in 2021–2026; minimum variance left 25%. The 10-year
   yield was moving on its own then (finding 2); with the 9-year bond as the long hedge, duration
-  left 46% over the whole period against 55%.
+  left 67% in 2014–2020 against 105%, and 46% over the whole period against 55%.
 
 ### 5. The slope predicted the 1-year yield, much less beyond it; nothing predicted long rates or bond returns
 
@@ -138,18 +147,20 @@ the 5-year minus the 1- and 10-year). Three outcomes over the next 12 months: th
 1-year yield, the change in the 10-year yield, and the 10-year bond's return above the 1-year
 yield (a par bond's coupon plus the price change as its yield moves to the 9-year yield a year
 later, using its modified duration with annual coupons, an approximation). In-sample regressions
-use Newey-West t with 12 lags, since 12-month outcomes overlap (347 months, October 1996 to June
+use Newey-West t with 12 lags, since 12-month outcomes overlap (347 months, May 1996 to June
 2025). Out of sample, from January 2006 each month's forecast comes from a regression on the pairs
 whose outcomes were already known, and is scored against the average of those same past outcomes
-(234 forecasts, R² below zero = worse than the average).
+(234 forecasts, R² below zero = worse than the average). Overlapping 12-month outcomes make that
+about 19 independent years, so out-of-sample R² carries no significance test.
 
 - **A steep curve came before a rising 1-year yield.** Each percentage point of slope added 68 bp to
   the 1-year yield's next-year change (t 3.50, R² 17.6%); out of sample R² was 16.0%, on the right
   side of the average 68% of the time. With a slope above 1.5 points the 1-year yield rose in 75% of
   months (mean +96 bp); below 0.25 points, in 19% (mean −71 bp).
-- **Much of that was the 1-year yield itself.** The 1-year point is the noisiest on the curve
-  (finding 3), and a slope built from it partly measures where it bounces back to. With the 2-year
-  yield in its place, out-of-sample R² was 5.3%; with the 3-year, −4.6%.
+- **It held without the 1-year in the slope, but faded further out.** Slopes that leave out the
+  1-year yield also predicted it: 10-year minus 2-year out-of-sample R² 9.9% (t 2.94), 2-year minus
+  1-year 12.5%. Predicting the 2-year yield from the 10-year minus 2-year slope gave 5.3%, and the
+  3-year from 10-year minus 3-year −4.6%.
 - **Long yields and bond returns weren't predictable.** Out of sample the slope did worse than the
   average for the 10-year yield's change (R² −10.5%) and the 10-year bond's extra return (−13.7%),
   which averaged +2.29% a year (standard deviation 6.30).
@@ -190,7 +201,8 @@ archive (from 2013; NIFTY is a price index). A month's level move is the average
 checks: NIFTY's monthly return regressed on both (Newey-West t, 3 lags; 160 months, March 2013 to
 June 2026); the curve as a regime input, NIFTY's next-month and next-12-month return on today's
 slope and on the past three months' level move, out of sample from January 2018 (expanding window,
-scored against the historical mean); and each stock's rate sensitivity (its monthly return on
+scored against the historical mean; 94 twelve-month forecasts, about 8 independent years, so these
+are rough); and each stock's rate sensitivity (its monthly return on
 NIFTY's and the level move) within the reference model's point-in-time top 200, in 2013–2019 against
 2020–2026.
 
@@ -211,7 +223,7 @@ NIFTY's and the level move) within the reference model's point-in-time top 200, 
   | Rate risk of a bond or gilt holding | Three PCA shapes from monthly changes on a rolling 5 years (1–3) |
   | Hedging rate risk | A minimum-variance hedge on 2–3 bonds, never an exact three-shape hedge (4) |
   | A yield at any maturity | Nelson-Siegel with a 1.75-year decay (6) |
-  | Rate exposure of the equity book | Measure it (about −4% per 100 bp); don't hedge it with rates |
+  | Rate exposure of the equity book | Measure it (−4% per 100 bp overall, −2.4% to −7.2% by period); hedging it wasn't tested |
   | Regime or timing signal | None: the curve predicted neither long rates, bond returns nor NIFTY (5, 7) |
   | Stock-level rate betas | Don't use as a stable trait or factor |
 

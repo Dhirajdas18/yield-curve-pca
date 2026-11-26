@@ -43,6 +43,9 @@ def report_pca(out_dir: Path) -> dict:
         res[f"  {nm} loadings"] = " ".join(f"{v:+.2f}" for v in p["loadings"][:, k])
     rec = p["scores"][:, :3] @ p["loadings"][:, :3].T + p["mean"]
     err = d.to_numpy() - rec
+    big = np.unravel_index(np.abs(err).argmax(), err.shape)
+    res["  largest miss"] = (f"{d.index[big[0]]:%b %Y} at {CORE[big[1]]} years "
+                             f"({err[big]:+.0f} bp)")
     res["  three components rebuild each month's move"] = (
         f"error {np.sqrt((err ** 2).mean()):.1f} bp root-mean-square, largest "
         f"{np.abs(err).max():.0f} bp, against "
@@ -286,7 +289,7 @@ def report_hedge(out_dir: Path) -> dict:
     Risk = standard deviation of the hedged monthly P&L as a share of the unhedged; worst month
     the same way; by period; the PCA three-shape hedge's largest positions; and the long hedge
     bond moved from 10 to 9 years."""
-    from yc import data, hedge
+    from yc import data, hedge, pca
 
     w = data.yields()
     d = changes(w, CORE)
@@ -314,7 +317,27 @@ def report_hedge(out_dir: Path) -> dict:
             f"{t:%b %Y} {v:.0f}x" for t, v in gross.nlargest(3).items())
         + f"; its five worst months carry {(r3 ** 2).nlargest(5).sum() / (r3 ** 2).sum():.0%} of "
         "its variance")
+    A = np.zeros((len(CORE), 3))
+    A[[1, 4, 9], range(3)] = 1.0
+    conds, curv = [], {}
+    for t in range(60, len(X)):
+        L = pca.pca(X[t - 60:t])["loadings"][:, :3]
+        conds.append(np.linalg.cond(L.T @ A))
+        curv[d.index[t]] = L[[1, 4, 9], 2]
+    conds = pd.Series(conds, index=dates)
+    worst = gross.idxmax()
+    res["  why: condition number of the three-bond system"] = (
+        f"median {conds.median():.1f}, largest {conds.max():.0f} ({conds.idxmax():%b %Y}); "
+        f"correlation of log hedge size with log condition number "
+        f"{np.corrcoef(np.log(gross), np.log(conds))[0, 1]:.2f}; curvature loadings on the 2y, 5y, "
+        f"10y bonds in {worst:%b %Y}: " + " ".join(f"{v:+.2f}" for v in curv[worst]))
     base = np.array([-b @ x for x in X[60:]])
+    base_s9 = pd.Series(base, index=dates)
+    r10 = pd.Series(hedge.backtest(X, CORE, b, [10], "duration"), index=dates)
+    r9 = pd.Series(hedge.backtest(X, CORE, b, [9], "duration"), index=dates)
+    res["  duration hedge in 2014-2020, 10-year against 9-year bond"] = (
+        f"{r10.loc['2014':'2020'].std() / base_s9.loc['2014':'2020'].std():.0%} against "
+        f"{r9.loc['2014':'2020'].std() / base_s9.loc['2014':'2020'].std():.0%}")
     nine = []
     for hn, (bonds, m) in HEDGES.items():
         r9 = hedge.backtest(X, CORE, b, [9 if x == 10 else x for x in bonds], m)
@@ -383,15 +406,24 @@ def report_predict(out_dir: Path) -> dict:
             f = P.oos(y, sg[cols])
             oos_tab[(k, "+".join(cols))] = P.oos_r2(f)
             hit = float((np.sign(f["model"] - f["mean"]) == np.sign(f["y"] - f["mean"])).mean())
+            coefs = ", ".join(f"{c} {bb:+.2f} (t {tt:.2f})"
+                              for c, bb, tt in zip(cols, b[1:], t[1:], strict=True))
             res[f"{k}, on {' and '.join(cols)}"] = (
-                f"{len(df)} months: " + ", ".join(f"{c} {bb:+.2f} (t {tt:.2f})" for c, bb, tt in
-                                                  zip(cols, b[1:], t[1:], strict=True))
+                f"{len(df)} months ({df.index[0]:%b %Y}-{df.index[-1]:%b %Y}): " + coefs
                 + f", R² {r2:.1%}; out of sample {len(f)} forecasts ({f.index[0]:%b %Y}-"
                 f"{f.index[-1]:%b %Y}): R² {oos_tab[(k, '+'.join(cols))]:+.1%}, right side of the "
                 f"mean {hit:.0%}")
     ex = outs["10-year bond return above the 1-year yield"].dropna()
     res["10-year bond return above the 1-year yield"] = (
         f"mean {ex.mean():+.2f}% a year, standard deviation {ex.std():.2f}")
+    y1 = outs["1-year yield change"]
+    for lab, x in (("10y - 2y", (w[10] - w[2]).rename("slope")),
+                   ("2y - 1y", (w[2] - w[1]).rename("slope"))):
+        f = P.oos(y1, x.to_frame())
+        df = pd.concat([y1, x], axis=1).dropna()
+        bb, tt, r2 = P.nw_t(df.iloc[:, 0].to_numpy(), df[["slope"]].to_numpy(), 12)
+        res[f"  1-year yield change on the {lab} slope"] = (
+            f"slope {bb[1]:+.2f} (t {tt[1]:.2f}), R² {r2:.1%}; out of sample R² {P.oos_r2(f):+.1%}")
     for short in (2, 3):
         y = w[short].shift(-12) - w[short]
         x = (w[10] - w[short]).rename("slope").to_frame()
@@ -490,8 +522,9 @@ def report_ns(out_dir: Path) -> dict:
         f"{pca.captured(dte, pca.pca(dtr)['loadings'][:, :3]):.1%}; best possible three "
         f"{pca.pca(dte)['share'][:3].sum():.1%}")
     bt, _ = ns.fit(lv.to_numpy(), CORE, lam)
-    db = np.diff(bt, axis=0)[-len(d):]
+    dbf = pd.DataFrame(bt, index=lv.index).diff().reindex(d.index)
     sc = pca.pca(d.to_numpy())["scores"][:, :3]
+    db = dbf.to_numpy()
     C = np.corrcoef(np.c_[db, sc].T)[:3, 3:]
     for i, nm in enumerate(("level b0", "slope b1", "curvature b2")):
         res[f"  Nelson-Siegel {nm} change, correlation with PCA level / slope / curvature"] = (

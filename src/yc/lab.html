@@ -4,7 +4,7 @@
     <label>To <select id="yc-to"></select></label>
     <label>Maturities <select id="yc-set">
       <option value="10">1 to 10 years</option>
-      <option value="15">1 to 15 years</option>
+      <option value="15">1 to 10, 12 and 15 years</option>
       <option value="30">1 to 30 years</option>
     </select></label>
     <label>Run on <select id="yc-on">
@@ -26,9 +26,10 @@ moves the middle against both ends.</p>
 each component accounts for. The first three usually add up to well over 90%.</p>
 <div id="yc-share" class="sim-chart short" role="img" aria-label="Bar chart of the share of yield movement explained by each component"></div>
 <h3>The components over time</h3>
-<p class="note">How to read it: each component’s running value month by month, in percentage
-points of yield. On monthly changes, a rising level line means yields rose across the curve; a
-rising slope line means the curve got steeper.</p>
+<p class="note">How to read it: on monthly changes, each line adds up the month’s moves along one
+shape, so a falling level line means yields fell across the curve and a rising slope line means the
+curve got steeper. Units are the shape’s own: one unit of level moves each of ten yields by about a
+third of a percentage point. On yield levels, each line is the curve’s position along that shape.</p>
 <div id="yc-path" class="sim-chart" role="img" aria-label="Level, slope and curvature components over time"></div>
 <script>
 $js
@@ -93,10 +94,14 @@ $js
       Object.assign(base(), { showlegend: false, margin: { l: 72, r: 16, t: 16, b: 48 }, xaxis: axis("component"), yaxis: axis("share of movement, %") }), cfg);
     const path = NAMES.map((nm, k) => {
       let c = 0;
-      const y = p.scores.map((r) => (chg ? (c += r[k]) : r[k]) / 100);
+      // raw projections (not centred on the period's mean), so the paths keep their trend
+      const y = rows.map((r) => {
+        const v = r.reduce((s, x, j) => s + x * p.loadings[j][k], 0) / 100;
+        return chg ? (c += v) : v;
+      });
       return { x: dates, y, name: nm, mode: "lines", line: { color: COL[k], width: 2 }, hovertemplate: `${nm}: %{y:.2f} by %{x|%b %Y}<extra></extra>` };
     });
-    Plotly.react("yc-path", path, Object.assign(base(), { legend: legendFor("yc-path"), margin: marginFor("yc-path"), xaxis: axis(""), yaxis: axis(chg ? "running total, percentage points" : "component value, percentage points") }), cfg);
+    Plotly.react("yc-path", path, Object.assign(base(), { legend: legendFor("yc-path"), margin: marginFor("yc-path"), xaxis: axis(""), yaxis: axis(chg ? "running total along the shape" : "position along the shape") }), cfg);
   }
   ["yc-from", "yc-to", "yc-set", "yc-on"].forEach((id) => el(id).addEventListener("change", () => { save(); draw(); }));
   draw();

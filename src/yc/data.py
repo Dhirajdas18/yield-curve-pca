@@ -58,7 +58,7 @@ def parse(page: str) -> pd.DataFrame:
     if not m:
         raise ValueError("table title not found")
     body = t[m.end():]
-    end = re.search(r"Source\s*:|Note\s*:", body)
+    end = re.search(r"Source\s*:|Note\s*:|Top Back to previous page", body)
     tokens = (body[:end.start()] if end else body).split()
     rows, fy, i = [], None, 0
     while i < len(tokens):
@@ -87,6 +87,18 @@ def latest_edition(index_html: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def merge(parts: list[pd.DataFrame]) -> pd.DataFrame:
+    """Editions oldest first -> one table, the newest edition's value kept where they overlap;
+    refuses a history with a month missing from every edition."""
+    a = pd.concat([p.assign(edition=n) for n, p in enumerate(parts)])
+    a = a.sort_values("edition", kind="stable").drop_duplicates(["date", "maturity"], keep="last")
+    months = pd.date_range(a["date"].min(), a["date"].max(), freq="ME")
+    gap = months.difference(pd.DatetimeIndex(a["date"].unique()))
+    if len(gap):
+        raise ValueError(f"months missing from every edition: {list(gap.strftime('%b %Y'))}")
+    return a.sort_values(["date", "maturity"]).reset_index(drop=True)
+
+
 def fetch() -> pd.DataFrame:
     """Download every edition, newest last, and save the merged table (newest edition wins)."""
     ids = list(EDITIONS)
@@ -97,18 +109,13 @@ def fetch() -> pd.DataFrame:
     except OSError:
         pass
     parts = []
-    for n, i in enumerate(sorted(ids)):
-        d = parse(_get(PAGE.format(i)))
-        parts.append(d.assign(edition=n))
+    for i in sorted(ids):
+        parts.append(parse(_get(PAGE.format(i))))
         time.sleep(0.5)
-    a = pd.concat(parts).sort_values("edition").drop_duplicates(["date", "maturity"], keep="last")
-    months = pd.date_range(a["date"].min(), a["date"].max(), freq="ME")
-    gap = months.difference(pd.DatetimeIndex(a["date"].unique()))
-    if len(gap):
-        raise ValueError(f"months missing from every edition: {list(gap.strftime('%b %Y'))}")
+    a = merge(parts)
     out = data_dir()
     out.mkdir(parents=True, exist_ok=True)
-    a.drop(columns="edition").to_parquet(out / "yields.parquet")
+    a.to_parquet(out / "yields.parquet")
     return a
 
 

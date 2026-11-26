@@ -48,8 +48,9 @@ since 2008, taking the newest edition’s figure where they overlap.</li>
 points), over the months in the chosen years that have every chosen maturity. On monthly changes,
 only changes between consecutive months count. Each component’s sign is fixed so the level loads
 positively, the slope rises with maturity and the curvature dips in the middle.</li>
-<li>The paths chart shows each month’s component score; on monthly changes it is the running
-total, so it reads like the component’s own history.</li>
+<li>The paths chart projects each month onto each shape without removing the period’s average, so
+on monthly changes its running total keeps the trend: a level path that ends lower means yields
+fell over the period.</li>
 <li>Everything is computed on the same months it describes. Research only, not investment
 advice.</li>
 </ul>"""
