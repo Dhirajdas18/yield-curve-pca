@@ -530,6 +530,89 @@ def report_ns(out_dir: Path) -> dict:
     return res
 
 
+def report_verdict(out_dir: Path) -> dict:
+    """What the reference model should take from the curve. (1) NIFTY's monthly return on the month's level
+    move (average change of 1-10 year yields) and slope move (change in 10y - 1y), Newey-West t
+    (3 lags), whole period and halves. (2) The curve as a regime input: NIFTY's next-month and
+    next-12-month return on today's slope and on the past 3 months' level move, out of sample from
+    January 2018 (expanding window, scored against the historical mean). (3) Single stocks in
+    the reference model's point-in-time top 200: each stock's rate sensitivity (its return on NIFTY and the
+    level move) in 2013-2019 against 2020-2026. NIFTY and stocks from the NSE bhavcopy archive."""
+    from yc import data
+    from yc import predict as P
+    from yc import verdict as V
+
+    w = data.yields()
+    cm = V.curve_moves(w)
+    n = V.nifty_monthly()
+    j = pd.concat([n, cm], axis=1, sort=True).dropna()
+    res = {"NIFTY months": f"{len(j)}, {j.index[0]:%b %Y}-{j.index[-1]:%b %Y}"}
+    periods = (("all", None, None), ("2013-2019", None, "2019"), ("2020-2026", "2020", None))
+    for lab, a, b in periods:
+        x = j.loc[a:b]
+        bb, t, r2 = P.nw_t(x["nifty"].to_numpy() * 100, x[["level", "slope"]].to_numpy(), 3)
+        res[f"NIFTY on curve moves, {lab} ({len(x)} months)"] = (
+            f"{100 * bb[1]:+.1f}% per 100 bp level rise (t {t[1]:.2f}); {100 * bb[2]:+.1f}% per "
+            f"100 bp steepening (t {t[2]:.2f}); R² {r2:.1%}")
+    sg = P.signals(w)
+    lev3 = cm["level"].rolling(3).sum().rename("past 3 months' level move")
+    nxt = {"next month": (n.shift(-1), 1),
+           "next 12 months": ((1 + n).rolling(12).apply(np.prod, raw=True).shift(-12) - 1, 12)}
+    for lab, (y, h) in nxt.items():
+        for x in (sg[["slope"]], lev3.to_frame()):
+            f = P.oos(y, x, h=h, start="2018-01-31", min_obs=48)
+            df = pd.concat([y, x], axis=1, sort=True).dropna()
+            bb, t, r2 = P.nw_t(df.iloc[:, 0].to_numpy(), df.iloc[:, 1:].to_numpy(), max(h, 3))
+            res[f"NIFTY {lab} on {x.columns[0]}"] = (
+                f"in-sample t {t[1]:.2f}, R² {r2:.1%}; out of sample {len(f)} forecasts, R² "
+                f"{P.oos_r2(f):+.1%}")
+    px, uni = V.stock_panel()
+    r = px.pct_change(fill_method=None)
+    r = r.where(uni.shift(1).reindex_like(r).fillna(False).astype(bool))
+    X = pd.concat([n, cm["level"]], axis=1, sort=True).dropna()
+    b1, b2 = V.stock_rate_betas(r, X, None, "2019"), V.stock_rate_betas(r, X, "2020", None)
+    bj = pd.concat([b1.rename("a"), b2.rename("b")], axis=1).dropna()
+    res["stock rate sensitivity, % per 100 bp level rise beyond NIFTY's"] = (
+        f"{len(b1)} stocks in 2013-2019 (median {b1.median():+.1f}), {len(b2)} in 2020-2026 "
+        f"(median {b2.median():+.1f}); {len(bj)} in both: rank correlation "
+        f"{bj['a'].rank().corr(bj['b'].rank()):+.2f}")
+    top, bot = bj["a"] >= bj["a"].quantile(0.8), bj["a"] <= bj["a"].quantile(0.2)
+    res["  most and least rate-sensitive fifth in 2013-2019, in 2020-2026"] = (
+        f"least sensitive (most positive) {bj.loc[top, 'b'].mean():+.1f}; most negative "
+        f"{bj.loc[bot, 'b'].mean():+.1f}; most negative five then: " + ", ".join(
+            f"{s_} {v:+.0f} then {bj.at[s_, 'b']:+.0f}" for s_, v in bj["a"].nsmallest(5).items()))
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    ax = axes[0]
+    ax.scatter(j["level"], 100 * j["nifty"], s=14, color=plots.SERIES[0], alpha=0.65,
+               edgecolors="none")
+    bfit = np.polyfit(j["level"], 100 * j["nifty"], 1)
+    xs = np.linspace(j["level"].min(), j["level"].max(), 50)
+    ax.plot(xs, np.polyval(bfit, xs), color=plots.TEXT_2, lw=1.5)
+    ax.axhline(0, color=plots.TEXT_2, lw=0.8)
+    ax.axvline(0, color=plots.TEXT_2, lw=0.8)
+    ax.set_xlabel("the month's level move: average change of 1-10 year yields, bp")
+    ax.set_ylabel("NIFTY's return that month, %")
+    ax.set_title("Rates explained little of NIFTY's month", fontsize=10.5, loc="left")
+    ax = axes[1]
+    ax.scatter(bj["a"], bj["b"], s=16, color=plots.SERIES[1], alpha=0.7, edgecolors="none")
+    lim = float(np.nanpercentile(np.abs(bj.to_numpy()), 98)) * 1.1
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.plot([-lim, lim], [-lim, lim], color=plots.TEXT_2, lw=0.8, ls="--")
+    ax.axhline(0, color=plots.TEXT_2, lw=0.6)
+    ax.axvline(0, color=plots.TEXT_2, lw=0.6)
+    ax.set_xlabel("stock's rate sensitivity 2013-2019,\n% per 100 bp rise beyond NIFTY's")
+    ax.set_ylabel("same stock, 2020-2026")
+    ax.set_title("A stock's rate sensitivity didn't carry over", fontsize=10.5, loc="left")
+    fig.suptitle("For an equity model the curve is a risk to measure, not a signal to use",
+                 x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "verdict")
+    plt.close(fig)
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "pca": report_pca,
     "stability": report_stability,
@@ -537,4 +620,5 @@ REPORTS: dict[str, Callable[[Path], dict]] = {
     "hedge": report_hedge,
     "predict": report_predict,
     "ns": report_ns,
+    "verdict": report_verdict,
 }

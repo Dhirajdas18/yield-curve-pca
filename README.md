@@ -20,7 +20,7 @@ curve's movement each explains, and each one's path over time, computed in your 
 - [x] Hedging a bond portfolio with the components, against duration alone, out of sample
 - [x] Does the curve predict? Slope and curvature against future rate changes, out of sample
 - [x] PCA against Nelson-Siegel: fit and stability
-- [ ] Verdict: a curve-risk model and a regime input for the reference model
+- [x] Verdict: a curve-risk model and a regime input for the reference model
 
 ## Findings
 
@@ -180,18 +180,54 @@ are then held fixed and scored on 2010–2026 (198 curves). The ceiling is PCA f
   Nelson-Siegel's slope and curvature correlated −0.93 and −0.97 with PCA's; its level only +0.57
   with PCA's level, which leans to the short end (finding 1), and +0.69 with PCA's curvature.
 
+### 7. For an equity model the curve is a risk to measure, not a signal to use
+
+<a href="docs/img/verdict.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/verdict.png"><img src="docs/img/verdict.gif" alt="NIFTY's monthly return against the month's average change in 1-10 year yields, 2013-2026, and each stock's sensitivity to yield moves in 2013-2019 against 2020-2026" width="720"></picture></a>
+
+The findings applied to the reference model, an NSE stock model, using NIFTY and stocks from the local NSE
+archive (from 2013; NIFTY is a price index). A month's level move is the average change in the
+1–10 year yields and its slope move the change in 10-year minus 1-year, in basis points. Three
+checks: NIFTY's monthly return regressed on both (Newey-West t, 3 lags; 160 months, March 2013 to
+June 2026); the curve as a regime input, NIFTY's next-month and next-12-month return on today's
+slope and on the past three months' level move, out of sample from January 2018 (expanding window,
+scored against the historical mean); and each stock's rate sensitivity (its monthly return on
+NIFTY's and the level move) within the reference model's point-in-time top 200, in 2013–2019 against
+2020–2026.
+
+- **Rates explained little of NIFTY's month.** NIFTY moved −4.0% for each 100 bp rise in the curve's
+  level (t −2.32), but that explained 4.0% of its monthly variation; −2.4% (t −1.38) in 2013–2019
+  and −7.2% (t −2.18) in 2020–2026. Steepening added nothing (t 0.58).
+- **The curve didn't predict NIFTY.** Out of sample, today's slope and the past three months' level
+  move did worse than the historical average for next month's return (R² −4.2% and −2.4%) and for
+  the next 12 months' (−85.3% and −7.4%).
+- **A stock's rate sensitivity didn't carry over.** Beyond what NIFTY explains, 136 stocks' rate
+  sensitivities in 2013–2019 and 2020–2026 had a rank correlation of −0.20; the five most
+  rate-sensitive in 2013–2019, all public-sector lenders or companies (Canara Bank −22% per 100 bp,
+  then +13%), mostly flipped sign.
+- **The verdict.**
+
+  | Use in the reference model | Rule (finding) |
+  |---|---|
+  | Rate risk of a bond or gilt holding | Three PCA shapes from monthly changes on a rolling 5 years (1–3) |
+  | Hedging rate risk | A minimum-variance hedge on 2–3 bonds, never an exact three-shape hedge (4) |
+  | A yield at any maturity | Nelson-Siegel with a 1.75-year decay (6) |
+  | Rate exposure of the equity book | Measure it (about −4% per 100 bp); don't hedge it with rates |
+  | Regime or timing signal | None: the curve predicted neither long rates, bond returns nor NIFTY (5, 7) |
+  | Stock-level rate betas | Don't use as a stable trait or factor |
+
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py   # RBI Handbook tables -> data/rbi/yields.parquet
 uv run yc report pca                  # topics: pca, stability, levels, hedge,
-                                      # predict, ns
+                                      # predict, ns, verdict
 uv run python scripts/build_site.py   # PCA lab -> site/index.html
 uv run pytest
 ```
 
-The yields are downloaded from rbi.org.in, not committed.
+The yields are downloaded from rbi.org.in, not committed. The verdict also reads NIFTY and stock
+prices from a local NSE archive (`YC_LAKE_DIR`, default `/path/to/lake`).
 
 ## Design
 
@@ -205,6 +241,8 @@ The yields are downloaded from rbi.org.in, not committed.
   regressions and the expanding-window out-of-sample forecasts.
 - `src/yc/ns.py`: Nelson-Siegel with a fixed decay: shapes, least-squares fits, the decay chosen on
   training curves.
+- `src/yc/verdict.py`: level and slope moves, NIFTY and stock returns from the NSE archive, and
+  stocks' rate sensitivities.
 - `src/yc/yc.js`: the lab's browser copy of the PCA (Jacobi eigen-decomposition), tested against
   Python through Node.
 - `src/yc/site.py`: the PCA lab, one static Plotly page carrying the monthly yields.
