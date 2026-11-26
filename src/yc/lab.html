@@ -1,0 +1,104 @@
+<div class="calc">
+  <div class="calc-controls">
+    <label>From <select id="yc-from"></select></label>
+    <label>To <select id="yc-to"></select></label>
+    <label>Maturities <select id="yc-set">
+      <option value="10">1 to 10 years</option>
+      <option value="15">1 to 15 years</option>
+      <option value="30">1 to 30 years</option>
+    </select></label>
+    <label>Run on <select id="yc-on">
+      <option value="chg">Monthly changes</option>
+      <option value="lvl">Yield levels</option>
+    </select></label>
+  </div>
+</div>
+<p class="note" id="yc-status" aria-live="polite"></p>
+<dl class="stat-grid" id="yc-stats"></dl>
+<h3>The three shapes</h3>
+<p class="note">How to read it: each line shows how much every maturity’s yield moves when one
+component moves by one unit. A flat line (level) moves the whole curve up or down together; a
+rising line (slope) moves long yields one way and short yields the other; a bent line (curvature)
+moves the middle against both ends.</p>
+<div id="yc-load" class="sim-chart" role="img" aria-label="Loadings of the level, slope and curvature components across maturities"></div>
+<h3>How much each component explains</h3>
+<p class="note">How to read it: the share of all the yield movement in the years you picked that
+each component accounts for. The first three usually add up to well over 90%.</p>
+<div id="yc-share" class="sim-chart short" role="img" aria-label="Bar chart of the share of yield movement explained by each component"></div>
+<h3>The components over time</h3>
+<p class="note">How to read it: each component’s running value month by month, in percentage
+points of yield. On monthly changes, a rising level line means yields rose across the curve; a
+rising slope line means the curve got steeper.</p>
+<div id="yc-path" class="sim-chart" role="img" aria-label="Level, slope and curvature components over time"></div>
+<script>
+$js
+(() => {
+  const D = $data;
+  const el = (id) => document.getElementById(id);
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const cfg = { displaylogo: false, responsive: true };
+  const narrowAt = (id) => el(id).clientWidth < 560;
+  const base = () => ({ paper_bgcolor: css("--surface"), plot_bgcolor: css("--surface"),
+    font: { family: getComputedStyle(document.body).fontFamily, color: css("--text-2"), size: 12 },
+    margin: { l: 64, r: 16, t: 32, b: 56 }, hovermode: "closest" });
+  const legendFor = (id) => narrowAt(id)
+    ? { orientation: "h", x: 0, y: -0.2, yanchor: "top", font: { size: 11 } } : { orientation: "h", y: 1.02, yanchor: "bottom", x: 0 };
+  const marginFor = (id, b = 56) => ({ l: 72, r: 16, t: narrowAt(id) ? 24 : 56, b: narrowAt(id) ? b + 64 : b });
+  const axis = (title, extra = {}) => Object.assign({ title: { text: title }, gridcolor: css("--grid"), zerolinecolor: css("--text-2") }, extra);
+  const NAMES = ["level", "slope", "curvature"], COL = $colors;
+  const SETS = { 10: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 15: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15], 30: [1, 2, 3, 5, 7, 10, 15, 20, 25, 30] };
+  const years = [...new Set(D.months.map((m) => m.slice(0, 4)))];
+  for (const id of ["yc-from", "yc-to"]) el(id).innerHTML = years.map((y) => `<option>${y}</option>`).join("");
+  const h = new URLSearchParams(location.hash.slice(1));
+  el("yc-from").value = years.includes(h.get("from")) ? h.get("from") : years[0];
+  el("yc-to").value = years.includes(h.get("to")) ? h.get("to") : years[years.length - 1];
+  if (["10", "15", "30"].includes(h.get("set"))) el("yc-set").value = h.get("set");
+  if (["chg", "lvl"].includes(h.get("on"))) el("yc-on").value = h.get("on");
+  const save = () => history.replaceState(null, "", "#" + new URLSearchParams({ from: el("yc-from").value, to: el("yc-to").value, set: el("yc-set").value, on: el("yc-on").value }));
+
+  function draw() {
+    let a = el("yc-from").value, b = el("yc-to").value;
+    if (a > b) [a, b] = [b, a];
+    const mats = SETS[el("yc-set").value], chg = el("yc-on").value === "chg";
+    // months in range with every chosen maturity; changes only between consecutive months
+    const idx = D.months.map((m, i) => i).filter((i) => {
+      const y = D.months[i].slice(0, 4);
+      return y >= a && y <= b && mats.every((m) => D.y[m][i] !== null);
+    });
+    const rows = [], dates = [];
+    for (let k = 0; k < idx.length; k++) {
+      const i = idx[k];
+      if (chg) {
+        if (k === 0 || idx[k - 1] !== i - 1) continue;
+        rows.push(mats.map((m) => 100 * (D.y[m][i] - D.y[m][i - 1])));
+      } else rows.push(mats.map((m) => 100 * D.y[m][i]));
+      dates.push(D.months[i] + "-28");
+    }
+    if (rows.length < 24) {
+      el("yc-status").textContent = `Only ${rows.length} months have every maturity in these years; pick more years or fewer maturities (30-year yields are complete from 2018).`;
+      el("yc-stats").innerHTML = ""; ["yc-load", "yc-share", "yc-path"].forEach((id) => Plotly.purge(id));
+      return;
+    }
+    const p = YC.pca(rows);
+    el("yc-status").textContent = `${rows.length} months, ${dates[0].slice(0, 7)} to ${dates[dates.length - 1].slice(0, 7)}, ${mats.length} maturities, ${chg ? "monthly changes" : "yield levels"}.`;
+    const top3 = p.share.slice(0, 3).reduce((s, v) => s + v, 0);
+    el("yc-stats").innerHTML = [["Level", p.share[0]], ["Slope", p.share[1]], ["Curvature", p.share[2]], ["First three", top3]]
+      .map(([k, v]) => `<div><dt>${k}</dt><dd>${(100 * v).toFixed(1)}%</dd></div>`).join("");
+    const x = mats.map((m) => m + "y");
+    Plotly.react("yc-load", NAMES.map((nm, k) => ({ x, y: p.loadings.map((r) => r[k]), name: `${nm} (${(100 * p.share[k]).toFixed(0)}%)`, mode: "lines+markers",
+      line: { color: COL[k], width: 2 }, marker: { size: 7 }, hovertemplate: `${nm}, %{x}: %{y:.2f}<extra></extra>` })),
+      Object.assign(base(), { legend: legendFor("yc-load"), margin: marginFor("yc-load"), xaxis: axis("years to maturity", { type: "category" }), yaxis: axis("loading") }), cfg);
+    Plotly.react("yc-share", [{ type: "bar", x: p.share.slice(0, 6).map((_, i) => `${i + 1}`), y: p.share.slice(0, 6).map((v) => 100 * v), marker: { color: css("--accent") },
+      hovertemplate: "component %{x}: %{y:.1f}%<extra></extra>" }],
+      Object.assign(base(), { showlegend: false, margin: { l: 72, r: 16, t: 16, b: 48 }, xaxis: axis("component"), yaxis: axis("share of movement, %") }), cfg);
+    const path = NAMES.map((nm, k) => {
+      let c = 0;
+      const y = p.scores.map((r) => (chg ? (c += r[k]) : r[k]) / 100);
+      return { x: dates, y, name: nm, mode: "lines", line: { color: COL[k], width: 2 }, hovertemplate: `${nm}: %{y:.2f} by %{x|%b %Y}<extra></extra>` };
+    });
+    Plotly.react("yc-path", path, Object.assign(base(), { legend: legendFor("yc-path"), margin: marginFor("yc-path"), xaxis: axis(""), yaxis: axis(chg ? "running total, percentage points" : "component value, percentage points") }), cfg);
+  }
+  ["yc-from", "yc-to", "yc-set", "yc-on"].forEach((id) => el(id).addEventListener("change", () => { save(); draw(); }));
+  draw();
+})();
+</script>
