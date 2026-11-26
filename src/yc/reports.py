@@ -360,9 +360,98 @@ def report_hedge(out_dir: Path) -> dict:
     return res
 
 
+def report_predict(out_dir: Path) -> dict:
+    """Does today's curve predict the next 12 months? Outcomes: the change in the 1-year and
+    10-year yields, and the 10-year bond's return above the 1-year yield (yc.predict). Predictors:
+    slope (10y - 1y) and curvature (2 x 5y - 1y - 10y). In-sample regressions with Newey-West t
+    (12 lags, the outcomes overlap); out of sample from January 2006 with an expanding window that
+    only uses outcomes already known, scored against the historical mean (R² below zero = worse than
+    the mean). Also the 1-year yield's next-year change after flat or inverted curves."""
+    from yc import data
+    from yc import predict as P
+
+    w = data.yields()
+    sg = P.signals(w)
+    outs = {"1-year yield change": w[1].shift(-12) - w[1],
+            "10-year yield change": w[10].shift(-12) - w[10],
+            "10-year bond return above the 1-year yield": P.excess_return(w)}
+    res, oos_tab = {}, {}
+    for k, y in outs.items():
+        for cols in (["slope"], ["slope", "curvature"]):
+            df = pd.concat([y, sg[cols]], axis=1).dropna()
+            b, t, r2 = P.nw_t(df.iloc[:, 0].to_numpy(), df[cols].to_numpy(), 12)
+            f = P.oos(y, sg[cols])
+            oos_tab[(k, "+".join(cols))] = P.oos_r2(f)
+            hit = float((np.sign(f["model"] - f["mean"]) == np.sign(f["y"] - f["mean"])).mean())
+            res[f"{k}, on {' and '.join(cols)}"] = (
+                f"{len(df)} months: " + ", ".join(f"{c} {bb:+.2f} (t {tt:.2f})" for c, bb, tt in
+                                                  zip(cols, b[1:], t[1:], strict=True))
+                + f", R² {r2:.1%}; out of sample {len(f)} forecasts ({f.index[0]:%b %Y}-"
+                f"{f.index[-1]:%b %Y}): R² {oos_tab[(k, '+'.join(cols))]:+.1%}, right side of the "
+                f"mean {hit:.0%}")
+    ex = outs["10-year bond return above the 1-year yield"].dropna()
+    res["10-year bond return above the 1-year yield"] = (
+        f"mean {ex.mean():+.2f}% a year, standard deviation {ex.std():.2f}")
+    for short in (2, 3):
+        y = w[short].shift(-12) - w[short]
+        x = (w[10] - w[short]).rename("slope").to_frame()
+        df = pd.concat([y, x], axis=1).dropna()
+        b, t, r2 = P.nw_t(df.iloc[:, 0].to_numpy(), df[["slope"]].to_numpy(), 12)
+        res[f"  robustness: {short}-year yield change on 10y - {short}y slope"] = (
+            f"slope {b[1]:+.2f} (t {t[1]:.2f}), R² {r2:.1%}; out of sample R² "
+            f"{P.oos_r2(P.oos(y, x)):+.1%}")
+    ch1 = outs["1-year yield change"]
+    for lab, mask in (("slope below 0.25 pp", sg["slope"] < 0.25),
+                      ("slope 0.25-1.5 pp", sg["slope"].between(0.25, 1.5)),
+                      ("slope above 1.5 pp", sg["slope"] > 1.5)):
+        x = ch1[mask].dropna()
+        res[f"  1-year yield's next-year change, {lab}"] = (
+            f"{len(x)} months: mean {100 * x.mean():+.0f} bp, rose in {(x > 0).mean():.0%}")
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
+    ax = axes[0]
+    df = pd.concat([ch1.rename("y"), sg["slope"]], axis=1).dropna()
+    ax.scatter(df["slope"], 100 * df["y"], s=12, color=plots.SERIES[0], alpha=0.6,
+               edgecolors="none")
+    b = np.polyfit(df["slope"], 100 * df["y"], 1)
+    xs = np.linspace(df["slope"].min(), df["slope"].max(), 50)
+    ax.plot(xs, np.polyval(b, xs), color=plots.TEXT_2, lw=1.5)
+    ax.axhline(0, color=plots.TEXT_2, lw=0.8)
+    ax.set_xlabel("today's slope: 10-year minus 1-year yield, percentage points")
+    ax.set_ylabel("1-year yield's change over\nthe next 12 months, bp")
+    ax.set_title("A steep curve came before a rising 1-year yield", fontsize=10.5, loc="left")
+    ax = axes[1]
+    labs = list(outs)
+    x = np.arange(len(labs))
+    for i, (cols, col) in enumerate((("slope", plots.SERIES[0]),
+                                     ("slope+curvature", plots.SERIES[2]))):
+        v = [100 * oos_tab[(k, cols)] for k in labs]
+        bars = ax.bar(x + (i - 0.5) * 0.36, v, 0.34, color=col,
+                      label=cols.replace("+", " and "))
+        for bar, vv in zip(bars, v, strict=True):
+            ax.annotate(f"{vv:+.0f}%", (bar.get_x() + bar.get_width() / 2, vv),
+                        xytext=(0, 3 if vv >= 0 else -3), textcoords="offset points",
+                        ha="center", va="bottom" if vv >= 0 else "top", fontsize=8,
+                        color=plots.TEXT)
+    ax.axhline(0, color=plots.TEXT_2, lw=0.8)
+    ax.set_xticks(x, ["1-year yield\nchange", "10-year yield\nchange",
+                      "10-year bond's\nextra return"])
+    ax.set_ylabel("out-of-sample R², % (below 0 =\nworse than the average)")
+    ax.legend(frameon=False, fontsize=9, loc="lower left")
+    ax.margins(y=0.25)
+    ax.set_title("Out of sample, 2006-2025", fontsize=10.5, loc="left")
+    fig.suptitle("The slope predicted the 1-year yield, much less beyond it; nothing predicted "
+                 "long rates or bond returns", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "predict")
+    plt.close(fig)
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "pca": report_pca,
     "stability": report_stability,
     "levels": report_levels,
     "hedge": report_hedge,
+    "predict": report_predict,
 }

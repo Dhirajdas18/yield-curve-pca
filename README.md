@@ -18,7 +18,7 @@ curve's movement each explains, and each one's path over time, computed in your 
 - [x] Stability of the shapes over time: rolling PCA through rate cycles
 - [x] Changes against levels, and how the maturities chosen change the answer
 - [x] Hedging a bond portfolio with the components, against duration alone, out of sample
-- [ ] Does the curve predict? Slope and curvature against future rate changes, out of sample
+- [x] Does the curve predict? Slope and curvature against future rate changes, out of sample
 - [ ] PCA against Nelson-Siegel: fit and stability
 - [ ] Verdict: a curve-risk model and a regime input for the reference model
 
@@ -129,12 +129,40 @@ convexity, carry, roll-down and trading costs are left out.
   yield was moving on its own then (finding 2); with the 9-year bond as the long hedge, duration
   left 46% over the whole period against 55%.
 
+### 5. The slope predicted the 1-year yield, much less beyond it; nothing predicted long rates or bond returns
+
+<a href="docs/img/predict.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/predict.png"><img src="docs/img/predict.gif" alt="Scatter of today's 10-year minus 1-year slope against the 1-year yield's change over the next 12 months, and out-of-sample R-squared for three outcomes from slope and from slope and curvature, 2006-2025" width="720"></picture></a>
+
+Each month's curve is summarised by its slope (10-year minus 1-year yield) and curvature (twice
+the 5-year minus the 1- and 10-year). Three outcomes over the next 12 months: the change in the
+1-year yield, the change in the 10-year yield, and the 10-year bond's return above the 1-year
+yield (a par bond's coupon plus the price change as its yield moves to the 9-year yield a year
+later, using its modified duration with annual coupons, an approximation). In-sample regressions
+use Newey-West t with 12 lags, since 12-month outcomes overlap (347 months, October 1996 to June
+2025). Out of sample, from January 2006 each month's forecast comes from a regression on the pairs
+whose outcomes were already known, and is scored against the average of those same past outcomes
+(234 forecasts, R² below zero = worse than the average).
+
+- **A steep curve came before a rising 1-year yield.** Each percentage point of slope added 68 bp to
+  the 1-year yield's next-year change (t 3.50, R² 17.6%); out of sample R² was 16.0%, on the right
+  side of the average 68% of the time. With a slope above 1.5 points the 1-year yield rose in 75% of
+  months (mean +96 bp); below 0.25 points, in 19% (mean −71 bp).
+- **Much of that was the 1-year yield itself.** The 1-year point is the noisiest on the curve
+  (finding 3), and a slope built from it partly measures where it bounces back to. With the 2-year
+  yield in its place, out-of-sample R² was 5.3%; with the 3-year, −4.6%.
+- **Long yields and bond returns weren't predictable.** Out of sample the slope did worse than the
+  average for the 10-year yield's change (R² −10.5%) and the 10-year bond's extra return (−13.7%),
+  which averaged +2.29% a year (standard deviation 6.30).
+- **Curvature added nothing out of sample.** With slope and curvature together, out-of-sample R² was
+  13.1%, −21.7% and −27.2%, worse than slope alone every time, though in-sample R² rose.
+
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py   # RBI Handbook tables -> data/rbi/yields.parquet
-uv run yc report pca                  # topics: pca, stability, levels, hedge
+uv run yc report pca                  # topics: pca, stability, levels, hedge,
+                                      # predict
 uv run python scripts/build_site.py   # PCA lab -> site/index.html
 uv run pytest
 ```
@@ -149,6 +177,8 @@ The yields are downloaded from rbi.org.in, not committed.
   of movement a set of shapes captures, and rolling windows scored on the following months.
 - `src/yc/hedge.py`: hedges for a book's key-rate exposures (duration, PCA, minimum variance),
   sized on past months only, and the month-by-month out-of-sample test.
+- `src/yc/predict.py`: slope and curvature signals, the 10-year bond's excess return, Newey-West
+  regressions and the expanding-window out-of-sample forecasts.
 - `src/yc/yc.js`: the lab's browser copy of the PCA (Jacobi eigen-decomposition), tested against
   Python through Node.
 - `src/yc/site.py`: the PCA lab, one static Plotly page carrying the monthly yields.
