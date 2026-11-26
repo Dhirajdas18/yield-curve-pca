@@ -17,7 +17,7 @@ curve's movement each explains, and each one's path over time, computed in your 
 - [x] PCA of monthly yield changes: level, slope and curvature, and how much each explains
 - [x] Stability of the shapes over time: rolling PCA through rate cycles
 - [x] Changes against levels, and how the maturities chosen change the answer
-- [ ] Hedging a bond portfolio with the components, against duration alone, out of sample
+- [x] Hedging a bond portfolio with the components, against duration alone, out of sample
 - [ ] Does the curve predict? Slope and curvature against future rate changes, out of sample
 - [ ] PCA against Nelson-Siegel: fit and stability
 - [ ] Verdict: a curve-risk model and a regime input for the reference model
@@ -102,12 +102,39 @@ maturity scaled to the same volatility) against covariance PCA, and different ma
   slope fell to 7.4% and curvature to 2.0%; with only 1, 2, 5 and 10 years the shares barely moved
   (83.4%, 10.2%, 4.2%).
 
+### 4. A regression hedge on three bonds beat duration; the exact three-shape hedge blew up
+
+<a href="docs/img/hedge.png"><picture><source media="(prefers-reduced-motion: reduce)" srcset="docs/img/hedge.png"><img src="docs/img/hedge.gif" alt="Monthly risk left after four hedges for three bond books, out of sample 2001-2026, and the rolling two-year risk left for the 1-10 year ladder" width="720"></picture></a>
+
+Three bond books, each described by its exposure in rupees per basis point at each maturity from
+1 to 10 years (total ₹10 per bp): an equal ladder, a 7-year bullet and a 1–3 year book. Each month
+from November 2001 to June 2026 (296 months), the hedge is sized on the previous 60 months of
+monthly changes only and scored on that month's actual moves. Four hedges: duration (10-year bonds
+sized to the book's total exposure, right if the curve moves in parallel); PCA level and slope
+(2- and 10-year bonds sized to leave no exposure to the first two shapes); PCA three shapes (2-,
+5- and 10-year bonds, no exposure to the first three); and minimum variance (the same three bonds,
+sized to minimise the hedged book's variance under the past 60 months' covariance). Risk is the
+standard deviation of the hedged monthly P&L as a share of the unhedged. Linear in yields:
+convexity, carry, roll-down and trading costs are left out.
+
+- **The regression hedge did best.** Minimum variance left 14% of the ladder's risk, 31% of the
+  bullet's and 20% of the short book's; duration left 55%, 53% and 77%.
+- **Level and slope beat duration.** The two-bond PCA hedge left 35%, 51% and 22%.
+- **The exact three-shape hedge blew up.** It left 91%, 100% and 230%. In a few months the three
+  bonds could barely offset the unstable curvature shape (finding 2), and the hedge grew to 156
+  times the ladder (April 2007), 83 times (February 2016) and 46 times (September 2005); the five
+  worst months carried 75% of its variance.
+- **In 2014–2020 duration hedging stopped working.** On the ladder it left 105% of the risk in those
+  years, against 41% in 2001–2013 and 48% in 2021–2026; minimum variance left 25%. The 10-year
+  yield was moving on its own then (finding 2); with the 9-year bond as the long hedge, duration
+  left 46% over the whole period against 55%.
+
 ## Quick start
 
 ```bash
 uv sync
 uv run python scripts/fetch_data.py   # RBI Handbook tables -> data/rbi/yields.parquet
-uv run yc report pca                  # topics: pca, stability, levels
+uv run yc report pca                  # topics: pca, stability, levels, hedge
 uv run python scripts/build_site.py   # PCA lab -> site/index.html
 uv run pytest
 ```
@@ -120,6 +147,8 @@ The yields are downloaded from rbi.org.in, not committed.
   parses it, merges editions (newest wins) and refuses a history with a missing month.
 - `src/yc/pca.py`: PCA of yield moves with fixed signs for level, slope and curvature, the share
   of movement a set of shapes captures, and rolling windows scored on the following months.
+- `src/yc/hedge.py`: hedges for a book's key-rate exposures (duration, PCA, minimum variance),
+  sized on past months only, and the month-by-month out-of-sample test.
 - `src/yc/yc.js`: the lab's browser copy of the PCA (Jacobi eigen-decomposition), tested against
   Python through Node.
 - `src/yc/site.py`: the PCA lab, one static Plotly page carrying the monthly yields.

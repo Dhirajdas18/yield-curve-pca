@@ -273,8 +273,96 @@ def report_levels(out_dir: Path) -> dict:
     return res
 
 
+BOOKS = {"1-10 year ladder": np.ones(10), "7-year bullet": np.eye(10)[6] * 10,
+         "1-3 year book": np.r_[np.full(3, 10 / 3), np.zeros(7)]}
+HEDGES = {"duration (10y)": ([10], "duration"), "PCA level+slope (2y, 10y)": ([2, 10], "pca"),
+          "PCA three shapes (2y, 5y, 10y)": ([2, 5, 10], "pca"),
+          "minimum variance (2y, 5y, 10y)": ([2, 5, 10], "minvar")}
+
+
+def report_hedge(out_dir: Path) -> dict:
+    """Hedging three bond books (rupees per bp at 1-10 years, total 10) out of sample: each
+    month's hedge sized on the previous 60 months of 1-10 year changes, scored on that month.
+    Risk = standard deviation of the hedged monthly P&L as a share of the unhedged; worst month
+    the same way; by period; the PCA three-shape hedge's largest positions; and the long hedge
+    bond moved from 10 to 9 years."""
+    from yc import data, hedge
+
+    w = data.yields()
+    d = changes(w, CORE)
+    X, dates = d.to_numpy(), d.index[60:]
+    res = {"scored months": f"{len(dates)}, {dates[0]:%b %Y}-{dates[-1]:%b %Y}"}
+    table = {}
+    for bn, b in BOOKS.items():
+        base = pd.Series([-b @ x for x in X[60:]], index=dates)
+        cells = []
+        for hn, (bonds, m) in HEDGES.items():
+            r = pd.Series(hedge.backtest(X, CORE, b, bonds, m), index=dates)
+            ratio = r.std() / base.std()
+            table[(bn, hn)] = ratio
+            by = ", ".join(f"{a}-{c[-2:]} {r.loc[a:c].std() / base.loc[a:c].std():.0%}"
+                           for a, c in (("2001", "2013"), ("2014", "2020"), ("2021", "2026")))
+            cells.append(f"{hn} {ratio:.0%} (worst month {r.abs().max() / base.abs().max():.0%}; "
+                         f"{by})")
+        res[f"{bn}: unhedged risk Rs {base.std():.0f} a month"] = "; ".join(cells)
+    b = BOOKS["1-10 year ladder"]
+    gross = pd.Series([np.abs(hedge.hedge(b, X[t - 60:t], CORE, [2, 5, 10], "pca")).sum() / 10
+                       for t in range(60, len(X))], index=dates)
+    r3 = pd.Series(hedge.backtest(X, CORE, b, [2, 5, 10], "pca"), index=dates)
+    res["  ladder, PCA three-shape hedge size (gross hedge / book)"] = (
+        f"median {gross.median():.1f}; largest " + ", ".join(
+            f"{t:%b %Y} {v:.0f}x" for t, v in gross.nlargest(3).items())
+        + f"; its five worst months carry {(r3 ** 2).nlargest(5).sum() / (r3 ** 2).sum():.0%} of "
+        "its variance")
+    base = np.array([-b @ x for x in X[60:]])
+    nine = []
+    for hn, (bonds, m) in HEDGES.items():
+        r9 = hedge.backtest(X, CORE, b, [9 if x == 10 else x for x in bonds], m)
+        nine.append(f"{hn.split(' (')[0]} {r9.std() / base.std():.0%}")
+    res["  ladder with the 9-year bond in place of the 10-year"] = ", ".join(nine)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6), gridspec_kw={"width_ratios": [1.2, 1]})
+    ax = axes[0]
+    x = np.arange(len(BOOKS))
+    cols = (plots.MUTED, plots.SERIES[1], plots.SERIES[2], plots.SERIES[0])
+    for i, (hn, col) in enumerate(zip(HEDGES, cols, strict=True)):
+        v = [100 * table[(bn, hn)] for bn in BOOKS]
+        bars = ax.bar(x + (i - 1.5) * 0.2, np.minimum(v, 150), 0.19, color=col, label=hn)
+        for bar, vv in zip(bars, v, strict=True):
+            ax.annotate(f"{vv:.0f}", (bar.get_x() + bar.get_width() / 2, min(vv, 150)),
+                        xytext=(0, 2), textcoords="offset points", ha="center", fontsize=7.5,
+                        color=plots.TEXT)
+    ax.axhline(100, color=plots.TEXT_2, lw=0.8, ls="--")
+    ax.text(x[-1] + 0.45, 101, "no hedge", fontsize=8, color=plots.TEXT_2, ha="right",
+            va="bottom")
+    ax.set_xticks(x, list(BOOKS))
+    ax.set_ylim(0, 165)
+    ax.set_ylabel("monthly risk left after hedging,\n% of unhedged (capped at 150)")
+    ax.legend(frameon=False, fontsize=8, loc="upper left")
+    ax.set_title("Out of sample, 2001-2026", fontsize=10.5, loc="left")
+    ax = axes[1]
+    base_s = pd.Series(base, index=dates)
+    for hn, col in (("duration (10y)", plots.MUTED), ("PCA level+slope (2y, 10y)", plots.SERIES[1]),
+                    ("minimum variance (2y, 5y, 10y)", plots.SERIES[0])):
+        bonds, m = HEDGES[hn]
+        r = pd.Series(hedge.backtest(X, CORE, b, bonds, m), index=dates)
+        roll = r.rolling(24).std() / base_s.rolling(24).std()
+        ax.plot(roll.index, 100 * roll, color=col, lw=2, label=hn)
+    ax.axhline(100, color=plots.TEXT_2, lw=0.8, ls="--")
+    ax.set_ylabel("risk left, % of unhedged\n(rolling 2 years, ladder)")
+    ax.legend(frameon=False, fontsize=8.5, loc="upper left")
+    ax.set_title("Duration hedging failed in 2014-2020", fontsize=10.5, loc="left")
+    fig.suptitle("A regression hedge on three bonds beat duration; the exact three-shape hedge "
+                 "blew up", x=0.01, ha="left", fontweight="bold")
+    fig.tight_layout()
+    plots.save(fig, out_dir, "hedge")
+    plt.close(fig)
+    return res
+
+
 REPORTS: dict[str, Callable[[Path], dict]] = {
     "pca": report_pca,
     "stability": report_stability,
     "levels": report_levels,
+    "hedge": report_hedge,
 }
