@@ -564,12 +564,12 @@ def report_ns(out_dir: Path) -> dict:
 
 
 def report_verdict(out_dir: Path) -> dict:
-    """What the reference model should take from the curve. (1) NIFTY's monthly return on the month's level
+    """What the reference model should take from the curve. (1) NIFTY's monthly return on the level
     move (average change of 1-10 year yields) and slope move (change in 10y - 1y), Newey-West t
     (3 lags), whole period and halves. (2) The curve as a regime input: NIFTY's next-month and
     next-12-month return on today's slope and on the past 3 months' level move, out of sample from
     January 2018 (expanding window, scored against the historical mean). (3) Single stocks in
-    the reference model's point-in-time top 200: each stock's rate sensitivity (its return on NIFTY and the
+    the reference point-in-time top 200: each stock's rate sensitivity (its return on NIFTY and the
     level move) in 2013-2019 against 2020-2026. NIFTY and stocks from the NSE bhavcopy archive."""
     from yc import data
     from yc import predict as P
